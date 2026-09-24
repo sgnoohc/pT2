@@ -15,6 +15,7 @@
 #include "pt2.h"
 #include "extrapolation.h"
 #include "extra_cuts.h"
+#include "model_inference.h"
 
 #include "TFile.h"
 #include "TTree.h"
@@ -31,10 +32,12 @@ int main(int argc, char** argv) {
     double myCutZ1 = 0.9304;
     std::string inputFile; 
     std::string outputDir;
+    float minPt = 0.6;
+    float maxPt = 0.8;
 
     // Command Line Arguments
     int opt;
-    while ((opt = getopt(argc, argv, "prki:o:n:e:")) != -1) {
+    while ((opt = getopt(argc, argv, "prki:o:n:e:m:M:")) != -1) {
         switch (opt) {
             case 'p':
                 makePlots = true;
@@ -57,6 +60,12 @@ int main(int argc, char** argv) {
             case 'e':
                 targetPercent = std::stod(optarg);
                 break;
+            case 'm':
+                minPt = std::stof(optarg);
+                break;
+            case 'M':
+                maxPt = std::stof(optarg);
+                break;
             default:
                 std::cerr << "Usage: " << argv[0] << "\n"
                     << "[-p] Make Plots\n"
@@ -65,7 +74,9 @@ int main(int argc, char** argv) {
                     << "[-i] Input File Path \n"
                     << "[-o] Output Directory \n"
                     << "[-n] Number of Events \n"
-                    << "[-e] Target percent \n";
+                    << "[-e] Target percent \n"
+                    << "[-m GeV] Minimum pT\n"
+                    << "[-M GeV] Maximum pT\n";
            return 1;
         }    
     }
@@ -81,10 +92,10 @@ int main(int argc, char** argv) {
     }
     if (inputFile.empty()){ 
         if (lowPT){
-            inputFile = "/blue/avery/aaponteutani/CMSSW_16_1_0/src/RecoTracker/LSTCore/standalone/LSTNtuple_pionGun_0p3.root"; //0.5GeV
+            //inputFile = "/blue/avery/aaponteutani/CMSSW_16_1_0/src/RecoTracker/LSTCore/standalone/LSTNtuple_pionGun_0p3.root"; //0.5GeV
            // inputFile = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/ROOT_FILES/LSTNtuple_LowPT.root"; //0.6 GeV
            //   inputFile = "/blue/avery/aaponteutani/CMSSW_16_1_0/src/RecoTracker/LSTCore/standalone/LSTNtuple_PU200_0p5.root";//0.5 GeV
-           // inputFile = "/blue/avery/aaponteutani/CMSSW_16_1_0/src/RecoTracker/LSTCore/standalone/LSTNtuple_PU200_0p6.root";//0.6 GeV
+            inputFile = "/blue/avery/aaponteutani/CMSSW_16_1_0/src/RecoTracker/LSTCore/standalone/LSTNtuple_PU200_0p6.root";//0.6 GeV
         }
         else {
             inputFile = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/ROOT_FILES/LSTNtuple.root";
@@ -108,23 +119,31 @@ int main(int argc, char** argv) {
     // Create the output directory
     std::filesystem::create_directories(outputDir);
 
+    const std::string MODEL_PATH = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/NN_MODEL/model.onnx";
+    const std::string MEAN_PATH = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/NN_MODEL/mean.npy";
+    const std::string STD_PATH = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/NN_MODEL/std.npy";
+    // ----- CUT SCORES -----
+    //const float CUT_SCORE = 0.9976133704185486f; // 90% Real Efficiency
+    //const float CUT_SCORE = 0.9933087825775146f; // 95% Real Efficiency
+    //const float CUT_SCORE = 0.9894251227378845f; // 96% Real Efficiency
+    //const float CUT_SCORE = 0.9768215417861938f; // 97% Real Efficiency
+    const float CUT_SCORE = 0.9252402186393738f; // 98% Real Efficiency
+    //const float CUT_SCORE = 0.7104159593582153f; // 99% Real Efficiency
+    //const float CUT_SCORE = 0.011754416860640049f; // 99.9% Real Efficiency
+
+    Pt2Scorer scorer(MODEL_PATH, MEAN_PATH, STD_PATH);
+    std::cout << "ML model loaded.  Active cut score = " << CUT_SCORE << "\n\n";
+
     // Initialize Histograms
     HistogramManager hists;
     hists.init();
 
-    // Options that are not ready
-   /* if (writeRoot) {
-        throw std::runtime_error(
-            "Error: options --writeRoot is not currently set up."
-        );
-    }*/
-
     // Get the Correct Pixel Map Directory
     std::string pixelMapFileDir;
     if (lowPT){
-       // pixelMapFileDir = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/PIXEL_MAPS/Pixel_Maps_0p6GeV/";
+       pixelMapFileDir = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/PIXEL_MAPS/Pixel_Maps_0p6GeV/";
        // pixelMapFileDir = "/blue/p.chang/aaponteutani/LSTGeometry/output_0p4/pixelmap/"; //0.4 GeV
-        pixelMapFileDir = "/blue/p.chang/aaponteutani/LSTGeometry/output_0p3/pixelmap/"; //0.5 GeV
+       // pixelMapFileDir = "/blue/p.chang/aaponteutani/LSTGeometry/output_0p3/pixelmap/"; //0.5 GeV
     }
     else{
         pixelMapFileDir = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/PIXEL_MAPS/Pixel_Maps_0p8GeV/";
@@ -158,51 +177,68 @@ int main(int argc, char** argv) {
 
     Long64_t totalEntries = reader.GetEntries();
     Long64_t entriesToProcess = (nEvents > 0 && nEvents < totalEntries) ? nEvents : totalEntries;
+    // Setting up training tree
+    std::string trainFileName = outputDir + "/pt2_training_data.root";
+    TFile* trainFile = new TFile(trainFileName.c_str(), "RECREATE");
+    TTree* trainTree = new TTree("tree", "pT2 Training Data");
 
-    // =========================================================================
-    //                        SETUP BDT OUTPUT TREE
-    // =========================================================================
-   /* std::string bdtFileName = outputDir + "/bdt_training_data.root";
-    TFile* bdtFile = new TFile(bdtFileName.c_str(), "RECREATE");
-    TTree* bdtTree = new TTree("pt2_features", "LST Variables for BDT Training");
+    // === Training Tree: per-event accumulator vectors ===
+    const std::vector<std::string> kCatNames = {
+        "E1PS_to_E22S",   // 0  — Endcap D1 PS  → Endcap D2 2S
+        "E1PS_to_E2PS",   // 1  — Endcap D1 PS  → Endcap D2 PS
+        "E2PS_to_E3PS",   // 2  — Endcap D2 PS  → Endcap D3 PS
+        "L1F_to_L2F",     // 3  — Layer 1 Flat  → Layer 2 Flat
+        "L1F_to_L2T",     // 4  — Layer 1 Flat  → Layer 2 Tilted
+        "L1T_to_E1PS",    // 5  — Layer 1 Tilt  → Endcap D1 PS
+        "L1T_to_L2F",     // 6  — Layer 1 Tilt  → Layer 2 Flat
+        "L1T_to_L2T",     // 7  — Layer 1 Tilt  → Layer 2 Tilted
+        "L2F_to_L3F",     // 8  — Layer 2 Flat  → Layer 3 Flat
+        "L2F_to_L3T",     // 9  — Layer 2 Flat  → Layer 3 Tilted
+        "L2T_to_E1PS",    // 10 — Layer 2 Tilt  → Endcap D1 PS
+        "L2T_to_L3F",     // 11 — Layer 2 Tilt  → Layer 3 Flat
+        "L2T_to_L3T",     // 12 — Layer 2 Tilt  → Layer 3 Tilted
+    };
+    std::vector<float> t_ls_pt, t_ls_eta, t_ls_phi;
+    std::vector<float> t_pls_pt, t_pls_eta, t_pls_phi;
+    std::vector<float> t_pls_charge, t_pls_nhit;
+    std::vector<float> t_pt2_delta_pt, t_pt2_delta_eta, t_pt2_delta_phi, t_pt2_delta_R;
+    std::vector<float> t_pt2_md0_dxy, t_pt2_md0_dz, t_pt2_md1_dxy, t_pt2_md1_dz;
+    std::vector<float> t_pt2_md0_rz, t_pt2_md1_rz, t_log_abs_md0_dxy;
+    std::vector<float> t_lst_dPhi, t_betaIn, t_betaOut, t_dBeta;
+    std::vector<float> t_lst_zResGeo, t_lst_zResKin, t_dAngle;
+    std::vector<int>   t_is_real;
+    std::array<std::vector<int>, 13> t_is_cat; // one-module/type: is_E1PS_to_E22S, …
 
-    // Variables to hold the data for each row
-    double b_lst_dPhi, b_betaIn, b_betaOut, b_dBeta;
-    double b_zResGeo, b_zResKin;
-    double b_delta_pt, b_delta_eta, b_delta_phi;
-    int b_is_real, b_is_used;
-    double b_heli_dXY0, b_heli_dZ0, b_heli_dXY1, b_heli_dZ1;
-    double b_rz_simple0, b_rz_simple1;
-    int b_event_id;
+    trainTree->Branch("ls_pt",           &t_ls_pt);
+    trainTree->Branch("ls_eta",          &t_ls_eta);
+    trainTree->Branch("ls_phi",      &t_ls_phi);
+    trainTree->Branch("pls_pt",          &t_pls_pt);
+    trainTree->Branch("pls_eta",         &t_pls_eta);
+    trainTree->Branch("pls_phi",     &t_pls_phi);
+    trainTree->Branch("pls_charge",      &t_pls_charge);
+    trainTree->Branch("pls_nhit",        &t_pls_nhit);
+    trainTree->Branch("pt2_delta_pt",    &t_pt2_delta_pt);
+    trainTree->Branch("pt2_delta_eta",   &t_pt2_delta_eta);
+    trainTree->Branch("pt2_delta_phi",   &t_pt2_delta_phi);
+    trainTree->Branch("pt2_delta_R",     &t_pt2_delta_R);
+    trainTree->Branch("pt2_md0_dxy",     &t_pt2_md0_dxy);
+    trainTree->Branch("pt2_md0_dz",      &t_pt2_md0_dz);
+    trainTree->Branch("pt2_md1_dxy",     &t_pt2_md1_dxy);
+    trainTree->Branch("pt2_md1_dz",      &t_pt2_md1_dz);
+    trainTree->Branch("pt2_md0_rz",      &t_pt2_md0_rz);
+    trainTree->Branch("pt2_md1_rz",      &t_pt2_md1_rz);
+    trainTree->Branch("log_abs_md0_dxy", &t_log_abs_md0_dxy);
+    trainTree->Branch("lst_dPhi",        &t_lst_dPhi);
+    trainTree->Branch("betaIn",          &t_betaIn);
+    trainTree->Branch("betaOut",         &t_betaOut);
+    trainTree->Branch("dBeta",           &t_dBeta);
+    trainTree->Branch("lst_zResGeo",     &t_lst_zResGeo);
+    trainTree->Branch("lst_zResKin",     &t_lst_zResKin);
+    trainTree->Branch("dAngle",          &t_dAngle);
+    trainTree->Branch("is_real",         &t_is_real);
+    for (int ci = 0; ci < 13; ++ci)
+        trainTree->Branch(("is_" + kCatNames[ci]).c_str(), &t_is_cat[ci]);
 
-    // The Categorization Variables for Python Slicing!
-    int b_combo_idx;
-    int b_charge_idx;
-
-    bdtTree->Branch("event_id", &b_event_id);
-    bdtTree->Branch("combo_idx", &b_combo_idx);
-    bdtTree->Branch("charge_idx", &b_charge_idx);
-
-    bdtTree->Branch("lst_dPhi", &b_lst_dPhi);
-    bdtTree->Branch("betaIn", &b_betaIn);
-    bdtTree->Branch("betaOut", &b_betaOut);
-    bdtTree->Branch("dBeta", &b_dBeta);
-    bdtTree->Branch("zResGeo", &b_zResGeo);
-    bdtTree->Branch("zResKin", &b_zResKin);
-    bdtTree->Branch("delta_pt", &b_delta_pt);
-    bdtTree->Branch("delta_eta", &b_delta_eta);
-    bdtTree->Branch("delta_phi", &b_delta_phi);
-    bdtTree->Branch("heli_dXY0", &b_heli_dXY0);
-    bdtTree->Branch("heli_dZ0", &b_heli_dZ0);
-    bdtTree->Branch("heli_dXY1", &b_heli_dXY1);
-    bdtTree->Branch("heli_dZ1", &b_heli_dZ1);
-    bdtTree->Branch("rz_simple0", &b_rz_simple0);
-    bdtTree->Branch("rz_simple1", &b_rz_simple1);
-
-    bdtTree->Branch("is_real", &b_is_real);
-    bdtTree->Branch("is_used", &b_is_used);
-       
-    */
     
     // === NEW: Output ROOT File Setup ===
     TFile* outRootFile = nullptr;
@@ -216,6 +252,7 @@ int main(int argc, char** argv) {
     std::vector<float> pT2_dR;
     std::vector<std::vector<int>> pT2_matched_simIdx; 
     std::vector<int>   sim_pT2_matched;
+    std::vector<float>   pT2_NNscore;
     // You can also add vector<vector<int>> for pT2_simIdxAll here if you calculate it!
 
     if (writeRoot) {
@@ -242,6 +279,7 @@ int main(int argc, char** argv) {
         outTree->Branch("pT2_dR",      &pT2_dR);
         outTree->Branch("pT2_matched_simIdx", &pT2_matched_simIdx); 
         outTree->Branch("sim_pT2_matched", &sim_pT2_matched);
+        outTree->Branch("pT2_NNscore", &pT2_NNscore);
     }
     // ===================================
 
@@ -272,6 +310,19 @@ int main(int argc, char** argv) {
             pT2_delta_pt.clear(); pT2_delta_eta.clear(); pT2_delta_phi.clear();
             pT2_dR.clear();
             pT2_matched_simIdx.clear();
+            pT2_NNscore.clear();
+
+            // Clear training vectors
+            t_ls_pt.clear(); t_ls_eta.clear(); t_ls_phi.clear(); 
+            t_pls_pt.clear(); t_pls_eta.clear(); t_pls_phi.clear(); 
+            t_pls_charge.clear(); t_pls_nhit.clear();
+            t_pt2_delta_pt.clear(); t_pt2_delta_eta.clear(); t_pt2_delta_phi.clear(); t_pt2_delta_R.clear();
+            t_pt2_md0_dxy.clear(); t_pt2_md0_dz.clear(); t_pt2_md1_dxy.clear(); t_pt2_md1_dz.clear();
+            t_pt2_md0_rz.clear(); t_pt2_md1_rz.clear(); t_log_abs_md0_dxy.clear();
+            t_lst_dPhi.clear(); t_betaIn.clear(); t_betaOut.clear(); t_dBeta.clear();
+            t_lst_zResGeo.clear(); t_lst_zResKin.clear(); t_dAngle.clear();
+            t_is_real.clear();
+            for (auto& v : t_is_cat) v.clear();
             
             if (reader.sim_pt) {
                 sim_pT2_matched.assign(reader.sim_pt->size(), 0);
@@ -332,7 +383,11 @@ int main(int argc, char** argv) {
             pt2.is_used = pt2UsedCalculator(reader, plsIdx, lsIdx);
 
             // Using only pls_pt from 0.6 to 0.8
-            if((reader.pls_pt->at(plsIdx)) > 0.5){continue;}
+            float pt = reader.pls_pt->at(plsIdx);
+
+            if (pt < minPt || pt > maxPt) {
+                continue;
+                }
 
             // Physics Calculations
             float dR = std::sqrt(pt2.delta_eta * pt2.delta_eta + pt2.delta_phi * pt2.delta_phi);
@@ -347,33 +402,40 @@ int main(int argc, char** argv) {
             double betaIn = betas[0];
             double lst_zResGeo = extra_cuts::calculateLSTOriginZResidual(plsIdx, lsIdx, reader);
             double lst_zResKin = extra_cuts::calculateLSTKinematicZResidual(plsIdx, lsIdx, reader);
+
+            // Preparing the 21 features for the NN scorer
+            std::array<float, 21> features = {{
+                reader.ls_pt->at(lsIdx),
+                reader.ls_eta->at(lsIdx),
+                std::sin(reader.ls_phi->at(lsIdx)),
+                std::cos(reader.ls_phi->at(lsIdx)),
+                reader.pls_pt->at(plsIdx),
+                reader.pls_eta->at(plsIdx),
+                std::sin(reader.pls_phi->at(plsIdx)),
+                std::cos(reader.pls_phi->at(plsIdx)),
+                static_cast<float>(reader.pls_charge->at(plsIdx)),
+                static_cast<float>(reader.pls_nhit->at(plsIdx)),
+                pt2.delta_pt,
+                pt2.delta_eta,
+                pt2.delta_phi,
+                dR,
+                static_cast<float>(heli[0]),
+                static_cast<float>(heli[1]),
+                static_cast<float>(heli[2]),
+                static_cast<float>(heli[3]),
+                static_cast<float>(rz_simple.first),
+                static_cast<float>(rz_simple.second),
+                std::log(std::abs(static_cast<float>(heli[0])) + 1e-6f),
+            }};
+
+            float mlscore = scorer.score(features);
+            //Apply ML cut, uncomment if wanting to apply cuts!
+
+            // if (
+            //     mlscore >= CUT_SCORE &&
+            //     true
+            // )
             
-           /* if (lst_dPhi > -100.0 && dBeta > -100.0) {
-                b_lst_dPhi  = lst_dPhi;
-                b_betaIn    = betaIn;
-                b_betaOut   = betaOut;
-                b_dBeta     = dBeta;
-                b_zResGeo   = lst_zResGeo;
-                b_zResKin   = lst_zResKin;
-                b_delta_pt  = pt2.delta_pt;
-                b_delta_eta = pt2.delta_eta;
-                b_delta_phi = pt2.delta_phi;
-                b_heli_dXY0 = heli[0];
-                b_heli_dZ0  = heli[1];
-                b_heli_dXY1 = heli[2];
-                b_heli_dZ1  = heli[3];
-                b_rz_simple0 = rz_simple.first;
-                b_rz_simple1 = rz_simple.second;
-                b_event_id  = ievt;
-
-                // The Machine Learning labels and categories!
-                b_is_real    = pt2.is_real ? 1 : 0;
-                b_is_used    = pt2.is_used ? 1 : 0;
-                b_combo_idx  = comboIdx;  // 0 to 12 (or -1 if invalid)
-                b_charge_idx = cIdx;      // 0 = Pos, 1 = Neg
-
-                bdtTree->Fill();
-            }*/
             // === NEW: Push data to branches ===
             // This happens ONLY for pt2s passing the > 0.8 pT requirement above.
             if (writeRoot) {
@@ -391,6 +453,7 @@ int main(int argc, char** argv) {
                 pT2_delta_eta.push_back(pt2.delta_eta);
                 pT2_delta_phi.push_back(pt2.delta_phi);
                 pT2_dR.push_back(dR);
+                pT2_NNscore.push_back(mlscore);
                 // -------- TRUTH MATCHING --------
                 if (pt2.is_real) {
                     // Get the sim track ID from the pLS
@@ -405,8 +468,39 @@ int main(int argc, char** argv) {
                     // Push an empty vector for fakes
                     pT2_matched_simIdx.push_back({});
                 }
+                // === Fill training vectors (one entry per pT2 candidate) ===
+                t_ls_pt.push_back(reader.ls_pt->at(lsIdx));
+                t_ls_eta.push_back(reader.ls_eta->at(lsIdx));
+                t_ls_phi.push_back(std::sin(reader.ls_phi->at(lsIdx)));
+                t_pls_pt.push_back(reader.pls_pt->at(plsIdx));
+                t_pls_eta.push_back(reader.pls_eta->at(plsIdx));
+                t_pls_phi.push_back(std::sin(reader.pls_phi->at(plsIdx)));
+                t_pls_charge.push_back(static_cast<float>(reader.pls_charge->at(plsIdx)));
+                t_pls_nhit.push_back(static_cast<float>(reader.pls_nhit->at(plsIdx)));
+                t_pt2_delta_pt.push_back(pt2.delta_pt);
+                t_pt2_delta_eta.push_back(pt2.delta_eta);
+                t_pt2_delta_phi.push_back(pt2.delta_phi);
+                t_pt2_delta_R.push_back(dR);
+                t_pt2_md0_dxy.push_back(static_cast<float>(heli[0]));
+                t_pt2_md0_dz.push_back(static_cast<float>(heli[1]));
+                t_pt2_md1_dxy.push_back(static_cast<float>(heli[2]));
+                t_pt2_md1_dz.push_back(static_cast<float>(heli[3]));
+                t_pt2_md0_rz.push_back(static_cast<float>(rz_simple.first));
+                t_pt2_md1_rz.push_back(static_cast<float>(rz_simple.second));
+                t_log_abs_md0_dxy.push_back(std::log(std::abs(static_cast<float>(heli[0])) + 1e-6f));
+                t_lst_dPhi.push_back(static_cast<float>(lst_dPhi));
+                t_betaIn.push_back(static_cast<float>(betaIn));
+                t_betaOut.push_back(static_cast<float>(betaOut));
+                t_dBeta.push_back(static_cast<float>(dBeta));
+                t_lst_zResGeo.push_back(static_cast<float>(lst_zResGeo));
+                t_lst_zResKin.push_back(static_cast<float>(lst_zResKin));
+                t_dAngle.push_back(static_cast<float>(dAngle));
+                t_is_real.push_back(pt2.is_real ? 1 : 0);
+                // 1 for this pT2's category, 0 for all others
+                for (int ci = 0; ci < 13; ++ci)
+                    t_is_cat[ci].push_back((comboIdx == ci) ? 1 : 0);
+
             }
-            // ==================================
 
             //if(heli[1] > myCutZ0 ||  heli[3] > myCutZ1 ){continue;}
             //if(heli[0] > 2.3896 ||  heli[2] > 3.4234 ){continue;}
@@ -602,7 +696,7 @@ int main(int argc, char** argv) {
                     // If the particle was completely lost before, officially mark it as found
                     if (reader.sim_tcIdx->at(primary_simIdx) == -1) {
                         reader.sim_tcIdx->at(primary_simIdx) = new_tc_index;
-                        std::cout << "found" <<std::endl;
+                        //std::cout << "found" <<std::endl;
                     }
                    // reader.sim_tcIdx->at(primary_simIdx) = new_tc_index;
                 }
@@ -610,6 +704,7 @@ int main(int argc, char** argv) {
             // ==========================
             // CRITICAL: Fill the TTree entry for this event!
             outTree->Fill();
+            trainTree->Fill();
         }
     }
    // --- AUTOMATED CUT CALCULATION ---
@@ -734,15 +829,12 @@ int main(int argc, char** argv) {
         }
     }
     std::cout << "\n" << std::string(80, '=') << "\n" << std::endl;
-     
-   /* bdtFile->cd();      // Ensure we are focused on the BDT file
-    bdtTree->Write();   // Write the tree to the disk
-    bdtFile->Close();   // Safely close the file to prevent corruption
-    std::cout << "Saved BDT Training Data to: " << bdtFileName << std::endl;
-    */
-    auto recipes = getPt2Recipes(hists);
-    Plotting plotter; 
-    plotter.plotRecipes(recipes, outputDir);
+
+    if (makePlots){
+        auto recipes = getPt2Recipes(hists);
+        Plotting plotter; 
+        plotter.plotRecipes(recipes, outputDir);
+    }
     
     // === NEW: Write to Output Root File ===
     if (writeRoot) {
@@ -750,7 +842,11 @@ int main(int argc, char** argv) {
         outTree->Write(); // Write the TTree containing pT3 branches + new pT2 branches!
         outRootFile->Close();
         std::cout << "Saved ROOT file containing old + new pT2 branches to: " << outputDir << "/LSTNtuple_with_pT2.root" << std::endl;
-    }
+        trainFile->cd();
+        trainTree->Write();
+        trainFile->Close();
+        std::cout << "Saved training data to: " << trainFileName << "\n";
+        }
     // =======================================
 
 
