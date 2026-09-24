@@ -1,39 +1,38 @@
-CXX := g++
-CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -MMD -MP
+CXX      := g++
+CXXFLAGS := -std=c++20 -O2 -Wall -Wextra
+ONNX_DIR := /cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/ENV_FILES/onnxruntime-linux-x64-1.17.0
 
-ROOTCFLAGS := $(shell root-config --cflags)
-ROOTLIBS   := $(shell root-config --libs)
+CPPFLAGS := -MMD -MP $(shell root-config --cflags) -isystem $(ONNX_DIR)/include
+LDLIBS   := $(shell root-config --libs) -L$(ONNX_DIR)/lib -lonnxruntime -Wl,-rpath,$(ONNX_DIR)/lib
 
 SRC_DIR   := src
-TOOLS_DIR := $(SRC_DIR)/tools
-INC_DIR   := include
 BUILD_DIR := build
 BIN_DIR   := bin
-BIN       := $(BIN_DIR)/pt2
 
-SOURCES := $(SRC_DIR)/main.cpp $(wildcard $(TOOLS_DIR)/*.cpp)
-OBJECTS := $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(notdir $(SOURCES)))
+# Files with their own main(); everything else in src/ is shared library code
+MAINS     := main study_convergence
+LIB_SRCS  := $(filter-out $(addprefix $(SRC_DIR)/,$(addsuffix .cc,$(MAINS))),$(wildcard $(SRC_DIR)/*.cc))
+LIB_OBJS  := $(LIB_SRCS:$(SRC_DIR)/%.cc=$(BUILD_DIR)/%.o)
 
-all: $(BIN)
+all: $(BIN_DIR)/pt2
 
-$(BIN): $(OBJECTS) | $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(ROOTLIBS)
+$(BIN_DIR)/pt2: $(BUILD_DIR)/main.o $(LIB_OBJS) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(ROOTCFLAGS) -I$(INC_DIR) -c $< -o $@
+# Optional: make study_convergence
+study_convergence: $(BIN_DIR)/study_convergence
+$(BIN_DIR)/study_convergence: $(BUILD_DIR)/study_convergence.o $(LIB_OBJS) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
 
-$(BUILD_DIR)/%.o: $(TOOLS_DIR)/%.cpp | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) $(ROOTCFLAGS) -I$(INC_DIR) -c $< -o $@
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cc | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
-
-$(BIN_DIR):
-	mkdir -p $(BIN_DIR)
+$(BUILD_DIR) $(BIN_DIR):
+	mkdir -p $@
 
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR)
 
--include $(OBJECTS:.o=.d)
+-include $(wildcard $(BUILD_DIR)/*.d)
 
-.PHONY: all clean
+.PHONY: all clean study_convergence

@@ -26,18 +26,42 @@ make -j8
 
 ## Running
 
-Once correctly compiled, the code can be run as follows:
+The code runs in three stages that share a histogram file (`<output dir>/pt2_hists.root`):
 
 ```
-./bin/pt2
+./bin/pt2 process -k -r      # event loop: build pT2s, fill histograms (-r also writes LSTNtuple_with_pT2.root)
+./bin/pt2 scan -e 90         # compute cut values at the target efficiency from the histograms
+./bin/pt2 plot               # draw plots + index.html from the histograms
 ```
 
-The full list of run options is as follows:
+`scan` and `plot` only read the histogram file, so they can be rerun without redoing the event loop.
+
+Options:
 
 ```
--i Input File Path
--o Output Directory
--k low pt (we usually use this)
--p plots
--r make root file adding pt2s
+process
+  -i Input File Path
+  -k low pt (we usually use this)
+  -n Number of events
+  -r make root file adding pt2s
+scan
+  -e Target efficiency percent (default 90)
+common
+  -o Output Directory (default: output)
+  -H Histogram file (default: <output dir>/pt2_hists.root)
 ```
+
+## Training the NN
+
+`process -r` also writes `<output dir>/pt2_training_data.root`: a flat tree with one row per pT2 and an `event_idx` branch.
+Train on one or more of these files with the PyTorch module (in a fresh shell, not one where `setup.sh` was sourced):
+
+```
+module load pytorch/2.8.0
+python pt2_ml/train_v7.py --data output/pt2_training_data.root --output_dir nn_out --skip_shap
+```
+
+- `--data` takes files, directories, or glob patterns. Rows are split into train/val/test by event (`--val_frac`, `--test_frac`, default 0.1 each).
+- `--fast_dev_run` does a quick 2-epoch check on a few batches.
+- SHAP plots need the `shap` package, which the module does not include; use `--skip_shap` otherwise.
+- The output directory gets `model.onnx`, `mean.npy`, `std.npy` (exported with a dynamic batch size), plus plots and `metrics.json`. Use it with `./bin/pt2 process -r -N nn_out`.
