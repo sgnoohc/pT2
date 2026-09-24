@@ -4,14 +4,38 @@
 #include <TH1D.h>
 #include <vector>
 #include <string>
+#include <utility>
+
+constexpr int kNCat = 13;    // LS layer-connection categories
+constexpr int kNCharge = 2;  // 0 = Pos, 1 = Neg
+
+using HistGrid = TH1D* [kNCat][kNCharge];
+
+// All per-pT2 variables for one (truth, usage, category, charge) slot
+struct Pt2HistSet {
+    TH1D *deltaPT, *deltaETA, *deltaPHI, *deltaR, *deltaAngle;
+    TH1D *pls_ETA, *ls_ETA;
+    TH1D *LSTdPhi, *LSTdBeta, *LSTbetaOut, *LSTOrgZRes, *LSTKinZRes;
+    TH1D *MD0_dXY, *MD0_dZ, *MD1_dXY, *MD1_dZ;
+    TH1D *MD0_rz_simple, *MD1_rz_simple;
+};
 
 class HistogramManager {
 public:
     HistogramManager() = default;
     ~HistogramManager() = default;
 
+    // Book empty histograms (detached from any TFile)
     void init();
-    void write();
+    // Write all histograms to a new ROOT file
+    void write(const std::string& path);
+    // Read all histograms back from a file made by write()
+    void load(const std::string& path);
+
+    // Histograms to fill for a pT2 of given truth / usage in (cat, charge)
+    const Pt2HistSet& set(bool real, bool unused, int cat, int charge) const {
+        return sets_[real ? 0 : 1][unused ? 1 : 0][cat][charge];
+    }
 
     // --- The 13 Valid Connections ---
     std::vector<std::string> catNames = {
@@ -125,6 +149,13 @@ public:
     TH1D* real_unused_pt2_MD1_rz_simple[13][2];
     TH1D* fake_unused_pt2_MD0_rz_simple[13][2];
     TH1D* fake_unused_pt2_MD1_rz_simple[13][2];
+
+private:
+    // Every histogram grid above, keyed by its base name
+    std::vector<std::pair<std::string, HistGrid*>> grids();
+    void buildSets();
+
+    Pt2HistSet sets_[2][2][kNCat][kNCharge];
 };
 
 #endif

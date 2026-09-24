@@ -1,5 +1,9 @@
 #include "histograms.h"
+#include <TFile.h>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 void HistogramManager::init() {
     for (int i = 0; i < 13; ++i) {
@@ -454,4 +458,151 @@ void HistogramManager::init() {
         );
     }
     }
+
+    for (auto& [name, grid] : grids())
+        for (int i = 0; i < kNCat; ++i)
+            for (int c = 0; c < kNCharge; ++c)
+                (*grid)[i][c]->SetDirectory(nullptr);
+
+    buildSets();
+}
+
+std::vector<std::pair<std::string, HistGrid*>> HistogramManager::grids() {
+#define REG(x) {#x, &x}
+    return {
+        REG(real_pt2_deltaPT),
+        REG(fake_pt2_deltaPT),
+        REG(real_unused_pt2_deltaPT),
+        REG(fake_unused_pt2_deltaPT),
+        REG(real_pt2_deltaETA),
+        REG(fake_pt2_deltaETA),
+        REG(real_unused_pt2_deltaETA),
+        REG(fake_unused_pt2_deltaETA),
+        REG(real_pt2_deltaPHI),
+        REG(fake_pt2_deltaPHI),
+        REG(real_unused_pt2_deltaPHI),
+        REG(fake_unused_pt2_deltaPHI),
+        REG(real_pt2_deltaR),
+        REG(fake_pt2_deltaR),
+        REG(real_unused_pt2_deltaR),
+        REG(fake_unused_pt2_deltaR),
+        REG(real_pt2_deltaAngle),
+        REG(fake_pt2_deltaAngle),
+        REG(real_unused_pt2_deltaAngle),
+        REG(fake_unused_pt2_deltaAngle),
+        REG(real_pt2_pls_ETA),
+        REG(fake_pt2_pls_ETA),
+        REG(real_unused_pt2_pls_ETA),
+        REG(fake_unused_pt2_pls_ETA),
+        REG(real_pt2_ls_ETA),
+        REG(fake_pt2_ls_ETA),
+        REG(real_unused_pt2_ls_ETA),
+        REG(fake_unused_pt2_ls_ETA),
+        REG(real_pt2_LSTdPhi),
+        REG(fake_pt2_LSTdPhi),
+        REG(real_unused_pt2_LSTdPhi),
+        REG(fake_unused_pt2_LSTdPhi),
+        REG(real_pt2_LSTdBeta),
+        REG(fake_pt2_LSTdBeta),
+        REG(real_unused_pt2_LSTdBeta),
+        REG(fake_unused_pt2_LSTdBeta),
+        REG(real_pt2_LSTbetaOut),
+        REG(fake_pt2_LSTbetaOut),
+        REG(real_unused_pt2_LSTbetaOut),
+        REG(fake_unused_pt2_LSTbetaOut),
+        REG(real_pt2_LSTOrgZRes),
+        REG(fake_pt2_LSTOrgZRes),
+        REG(real_unused_pt2_LSTOrgZRes),
+        REG(fake_unused_pt2_LSTOrgZRes),
+        REG(real_pt2_LSTKinZRes),
+        REG(fake_pt2_LSTKinZRes),
+        REG(real_unused_pt2_LSTKinZRes),
+        REG(fake_unused_pt2_LSTKinZRes),
+        REG(real_pt2_MD0_dXY),
+        REG(fake_pt2_MD0_dXY),
+        REG(real_unused_pt2_MD0_dXY),
+        REG(fake_unused_pt2_MD0_dXY),
+        REG(real_pt2_MD0_dZ),
+        REG(fake_pt2_MD0_dZ),
+        REG(real_unused_pt2_MD0_dZ),
+        REG(fake_unused_pt2_MD0_dZ),
+        REG(real_pt2_MD1_dXY),
+        REG(fake_pt2_MD1_dXY),
+        REG(real_unused_pt2_MD1_dXY),
+        REG(fake_unused_pt2_MD1_dXY),
+        REG(real_pt2_MD1_dZ),
+        REG(fake_pt2_MD1_dZ),
+        REG(real_unused_pt2_MD1_dZ),
+        REG(fake_unused_pt2_MD1_dZ),
+        REG(real_pt2_MD0_rz_simple),
+        REG(fake_pt2_MD0_rz_simple),
+        REG(real_unused_pt2_MD0_rz_simple),
+        REG(fake_unused_pt2_MD0_rz_simple),
+        REG(real_pt2_MD1_rz_simple),
+        REG(fake_pt2_MD1_rz_simple),
+        REG(real_unused_pt2_MD1_rz_simple),
+        REG(fake_unused_pt2_MD1_rz_simple),
+    };
+#undef REG
+}
+
+void HistogramManager::buildSets() {
+    std::unordered_map<std::string, HistGrid*> g;
+    for (auto& [name, grid] : grids()) g[name] = grid;
+
+    for (int real = 0; real < 2; ++real) {
+        for (int unused = 0; unused < 2; ++unused) {
+            std::string prefix = std::string(real ? "real" : "fake") + (unused ? "_unused" : "") + "_pt2_";
+            for (int i = 0; i < kNCat; ++i) {
+                for (int c = 0; c < kNCharge; ++c) {
+                    Pt2HistSet& s = sets_[real ? 0 : 1][unused][i][c];
+                    s.deltaPT = (*g[prefix + "deltaPT"])[i][c];
+                    s.deltaETA = (*g[prefix + "deltaETA"])[i][c];
+                    s.deltaPHI = (*g[prefix + "deltaPHI"])[i][c];
+                    s.deltaR = (*g[prefix + "deltaR"])[i][c];
+                    s.deltaAngle = (*g[prefix + "deltaAngle"])[i][c];
+                    s.pls_ETA = (*g[prefix + "pls_ETA"])[i][c];
+                    s.ls_ETA = (*g[prefix + "ls_ETA"])[i][c];
+                    s.LSTdPhi = (*g[prefix + "LSTdPhi"])[i][c];
+                    s.LSTdBeta = (*g[prefix + "LSTdBeta"])[i][c];
+                    s.LSTbetaOut = (*g[prefix + "LSTbetaOut"])[i][c];
+                    s.LSTOrgZRes = (*g[prefix + "LSTOrgZRes"])[i][c];
+                    s.LSTKinZRes = (*g[prefix + "LSTKinZRes"])[i][c];
+                    s.MD0_dXY = (*g[prefix + "MD0_dXY"])[i][c];
+                    s.MD0_dZ = (*g[prefix + "MD0_dZ"])[i][c];
+                    s.MD1_dXY = (*g[prefix + "MD1_dXY"])[i][c];
+                    s.MD1_dZ = (*g[prefix + "MD1_dZ"])[i][c];
+                    s.MD0_rz_simple = (*g[prefix + "MD0_rz_simple"])[i][c];
+                    s.MD1_rz_simple = (*g[prefix + "MD1_rz_simple"])[i][c];
+                }
+            }
+        }
+    }
+}
+
+void HistogramManager::write(const std::string& path) {
+    TFile f(path.c_str(), "RECREATE");
+    if (f.IsZombie()) throw std::runtime_error("cannot create " + path);
+    for (auto& [name, grid] : grids())
+        for (int i = 0; i < kNCat; ++i)
+            for (int c = 0; c < kNCharge; ++c)
+                f.WriteObject((*grid)[i][c], (*grid)[i][c]->GetName());
+    f.Close();
+}
+
+void HistogramManager::load(const std::string& path) {
+    std::unique_ptr<TFile> f(TFile::Open(path.c_str(), "READ"));
+    if (!f || f->IsZombie()) throw std::runtime_error("cannot open " + path);
+    for (auto& [name, grid] : grids()) {
+        for (int i = 0; i < kNCat; ++i) {
+            for (int c = 0; c < kNCharge; ++c) {
+                std::string key = name + "_" + catNames[i] + "_" + chargeNames[c];
+                TH1D* h = f->Get<TH1D>(key.c_str());
+                if (!h) throw std::runtime_error("histogram " + key + " missing in " + path);
+                h->SetDirectory(nullptr);
+                (*grid)[i][c] = h;
+            }
+        }
+    }
+    buildSets();
 }
