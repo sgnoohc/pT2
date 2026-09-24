@@ -224,12 +224,13 @@ void buildPt2sForPLS(size_t pls_idx,
 
     size_t nLS = reader.ls_pt->size(); // Get the total number of LS
     
-    for (size_t ls_idx = 0; ls_idx < nLS; ++ls_idx) {
-        if (pt2TruthFinder(reader, pls_idx, ls_idx)) {
-        pT2 obj(pls_idx, ls_idx);
-        pt2s.push_back(obj); }
-    }
-/*    int superbin = reader.pls_superbin[pls_idx];
+    // for (size_t ls_idx = 0; ls_idx < nLS; ++ls_idx) {
+    //     if (pt2TruthFinder(reader, pls_idx, ls_idx)) {
+    //     pT2 obj(pls_idx, ls_idx);
+    //     pt2s.push_back(obj); }
+    // }
+
+    int superbin = reader.pls_superbin[pls_idx];
     // Determine which SuperbinToDetIdMap to use
     const SuperbinToDetIdMap* selectedMap = nullptr;
     float pt = reader.pls_pt->at(pls_idx);
@@ -258,7 +259,7 @@ void buildPt2sForPLS(size_t pls_idx,
             pT2 obj(pls_idx, ls_idx);
             pt2s.push_back(obj);
         }
-    }*/
+    }
 }
 
 
