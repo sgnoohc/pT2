@@ -39,6 +39,7 @@ private:
     std::vector<float> pt_, eta_, phi_;
     std::vector<int> plsIdx_, lsIdx_;
     std::vector<int> isFake_, isUsed_, isDuplicate_;
+    std::vector<int> isNewTC_;  // 1 if the matched sim track had no LST TC before injection
     std::vector<float> deltaPt_, deltaEta_, deltaPhi_, dR_;
     std::vector<float> nnScore_;
     std::vector<std::vector<int>> matchedSimIdx_;

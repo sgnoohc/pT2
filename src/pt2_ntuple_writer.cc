@@ -19,6 +19,7 @@ Pt2NtupleWriter::Pt2NtupleWriter(const std::string& path, rootReader& reader)
     tree_->Branch("pT2_isFake", &isFake_);
     tree_->Branch("pT2_isUsed", &isUsed_);
     tree_->Branch("pT2_isDuplicate", &isDuplicate_);
+    tree_->Branch("pT2_isNewTC", &isNewTC_);
     tree_->Branch("pT2_deltaPt", &deltaPt_);
     tree_->Branch("pT2_deltaEta", &deltaEta_);
     tree_->Branch("pT2_deltaPhi", &deltaPhi_);
@@ -43,6 +44,7 @@ void Pt2NtupleWriter::beginEvent()
     isFake_.clear();
     isUsed_.clear();
     isDuplicate_.clear();
+    isNewTC_.clear();
     deltaPt_.clear();
     deltaEta_.clear();
     deltaPhi_.clear();
@@ -77,8 +79,14 @@ void Pt2NtupleWriter::add(const pT2& pt2)
         int simIdx = reader_.pls_simIdx->at(plsIdx);
         matchedSimIdx_.push_back({simIdx});
         if (simIdx >= 0 && simIdx < (int)simMatched_.size()) simMatched_[simIdx] += 1;
+        // New TC if LST found no TC for this sim track. sim_tcIdx is still the original
+        // LST value here since injection happens in endEvent. Duplicate pT2s all count.
+        bool isNewTC = simIdx >= 0 && simIdx < (int)reader_.sim_tcIdx->size()
+                       && reader_.sim_tcIdx->at(simIdx) < 0;
+        isNewTC_.push_back(isNewTC ? 1 : 0);
     } else {
         matchedSimIdx_.push_back({});
+        isNewTC_.push_back(0);
     }
 }
 
@@ -150,7 +158,7 @@ void Pt2NtupleWriter::injectIntoTCs()
         // Reverse truth match: tell the sim particle this track found it
         if (primarySimIdx >= 0 && primarySimIdx < (int)r.sim_tcIdxAll->size()) {
             r.sim_tcIdxAll->at(primarySimIdx).push_back(newTcIdx);
-            if (r.sim_tcIdx->at(primarySimIdx) == -1) r.sim_tcIdx->at(primarySimIdx) = newTcIdx;
+            if (r.sim_tcIdx->at(primarySimIdx) < 0) r.sim_tcIdx->at(primarySimIdx) = newTcIdx;
         }
     }
 }

@@ -221,6 +221,7 @@ int runProcess(const Config &cfg)
             batch.clear();
         };
 
+        int npt2 = 0;
         for (auto &pt2 : pt2s)
         {
             float plsPt = reader.pls_pt->at(pt2.pls_idx);
