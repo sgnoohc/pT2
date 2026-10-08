@@ -32,15 +32,17 @@ std::vector<std::unique_ptr<TH1D>> &mergedStore()
     return store;
 }
 
-// The histogram to plot for one group: the original when the group is a
-// single category, otherwise a fresh sum over its members.
-TH1D *grouped(ConstHistGrid grid, const std::vector<int> &cats, int c)
+// The histogram to plot for one group: the original when the group names a
+// single (category, charge), otherwise a fresh sum over every member.
+TH1D *grouped(ConstHistGrid grid, const std::vector<int> &cats, const std::vector<int> &charges)
 {
-    if (cats.size() == 1) return grid[cats[0]][c];
+    if (cats.size() == 1 && charges.size() == 1) return grid[cats[0]][charges[0]];
 
-    auto *sum = static_cast<TH1D *>(grid[cats[0]][c]->Clone());
+    auto *sum = static_cast<TH1D *>(grid[cats[0]][charges[0]]->Clone());
     sum->SetDirectory(nullptr);
-    for (size_t k = 1; k < cats.size(); ++k) sum->Add(grid[cats[k]][c]);
+    sum->Reset();
+    for (int i : cats)
+        for (int q : charges) sum->Add(grid[i][q]);
     mergedStore().emplace_back(sum);
     return sum;
 }
@@ -50,21 +52,46 @@ TH1D *grouped(ConstHistGrid grid, const std::vector<int> &cats, int c)
 std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
     std::vector<PlotRecipe> recipes;
 
-    // The 13 categories on their own, then each merged group.
-    std::vector<std::vector<int>> groups;
-    for (int i = 0; i < 13; ++i) groups.push_back({i});
-    for (const auto &g : kMergedGroups) groups.push_back(g);
+    // One entry per plot: which categories and charges to add together, and
+    // how to name the result.
+    struct PlotGroup {
+        std::vector<int> cats;
+        std::vector<int> charges;
+        std::string sfx;
+        std::string ttl;
+    };
+    std::vector<PlotGroup> groups;
 
-    for (const auto &grp : groups) {
-        for (int c = 0; c < 2; ++c) {
-        std::string cats = hists.catNames[grp[0]];
-        std::string titles = hists.catTitles[grp[0]];
-        for (size_t k = 1; k < grp.size(); ++k) {
-            cats += "_and_" + hists.catNames[grp[k]];
-            titles += " + " + hists.catTitles[grp[k]];
+    auto addGroup = [&](const std::vector<int> &cats, int c) {
+        std::string names = hists.catNames[cats[0]];
+        std::string titles = hists.catTitles[cats[0]];
+        for (size_t k = 1; k < cats.size(); ++k) {
+            names  += "_and_" + hists.catNames[cats[k]];
+            titles += " + "   + hists.catTitles[cats[k]];
         }
-        std::string sfx = "_" + cats + "_" + hists.chargeNames[c];
-        std::string ttl = " (" + titles +  ", " + hists.chargeTitles[c] + ")";
+        groups.push_back({cats, {c},
+                          "_" + names + "_" + hists.chargeNames[c],
+                          " (" + titles + ", " + hists.chargeTitles[c] + ")"});
+    };
+
+    // The 13 categories on their own, then each merged group.
+    for (int i = 0; i < 13; ++i)
+        for (int c = 0; c < 2; ++c) addGroup({i}, c);
+    for (const auto &m : kMergedGroups)
+        for (int c = 0; c < 2; ++c) addGroup(m, c);
+
+    // Everything pooled: all 13 categories and both charges summed into one
+    // plot per variable. The per-category pages show where a variable
+    // separates real from fake; this one shows what the sample as a whole
+    // looks like, which is what gets handed downstream.
+    std::vector<int> allCats(13);
+    for (int i = 0; i < 13; ++i) allCats[i] = i;
+    groups.push_back({allCats, {0, 1}, "_AllCategories",
+                      " (all categories, both charges)"});
+
+    for (const auto &g : groups) {
+        const std::string &sfx = g.sfx;
+        const std::string &ttl = g.ttl;
 
         // =====================================================================
         // ALL pT2s - KINEMATICS & LST VARIABLES
@@ -75,7 +102,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "#Delta p_{T} [GeV]",
             .yAxis = "Entries",
             .filename = "pt2_all_deltaPT" + sfx,
-            .hists = {grouped(hists.real_pt2_deltaPT, grp, c), grouped(hists.fake_pt2_deltaPT, grp, c)},
+            .hists = {grouped(hists.real_pt2_deltaPT, g.cats, g.charges), grouped(hists.fake_pt2_deltaPT, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -85,7 +112,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "#Delta #phi [rad]",
             .yAxis = "Entries",
             .filename = "pt2_all_deltaPHI" + sfx,
-            .hists = {grouped(hists.real_pt2_deltaPHI, grp, c), grouped(hists.fake_pt2_deltaPHI, grp, c)},
+            .hists = {grouped(hists.real_pt2_deltaPHI, g.cats, g.charges), grouped(hists.fake_pt2_deltaPHI, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -95,7 +122,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "#eta",
             .yAxis = "Entries",
             .filename = "pt2_all_ETA" + sfx,
-            .hists = {grouped(hists.real_pt2_deltaETA, grp, c), grouped(hists.fake_pt2_deltaETA, grp, c)},
+            .hists = {grouped(hists.real_pt2_deltaETA, g.cats, g.charges), grouped(hists.fake_pt2_deltaETA, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -106,7 +133,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "pLS #eta",
             .yAxis = "Entries",
             .filename = "pt2_all_pls_ETA" + sfx,
-            .hists = {grouped(hists.real_pt2_pls_ETA, grp, c), grouped(hists.fake_pt2_pls_ETA, grp, c)},
+            .hists = {grouped(hists.real_pt2_pls_ETA, g.cats, g.charges), grouped(hists.fake_pt2_pls_ETA, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -116,7 +143,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "pLS #eta",
             .yAxis = "Entries",
             .filename = "pt2_unused_pls_ETA" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_pls_ETA, grp, c), grouped(hists.fake_unused_pt2_pls_ETA, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_pls_ETA, g.cats, g.charges), grouped(hists.fake_unused_pt2_pls_ETA, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -127,7 +154,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "LS #eta",
             .yAxis = "Entries",
             .filename = "pt2_all_ls_ETA" + sfx,
-            .hists = {grouped(hists.real_pt2_ls_ETA, grp, c), grouped(hists.fake_pt2_ls_ETA, grp, c)},
+            .hists = {grouped(hists.real_pt2_ls_ETA, g.cats, g.charges), grouped(hists.fake_pt2_ls_ETA, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -137,7 +164,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "LS #eta",
             .yAxis = "Entries",
             .filename = "pt2_unused_ls_ETA" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_ls_ETA, grp, c), grouped(hists.fake_unused_pt2_ls_ETA, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_ls_ETA, g.cats, g.charges), grouped(hists.fake_unused_pt2_ls_ETA, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -147,7 +174,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "#Delta R",
             .yAxis = "Entries",
             .filename = "pt2_all_deltaR" + sfx,
-            .hists = {grouped(hists.real_pt2_deltaR, grp, c), grouped(hists.fake_pt2_deltaR, grp, c)},
+            .hists = {grouped(hists.real_pt2_deltaR, g.cats, g.charges), grouped(hists.fake_pt2_deltaR, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -157,7 +184,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "LST #Delta#beta [rad]",
             .yAxis = "Entries",
             .filename = "pt2_all_LSTdBeta" + sfx,
-            .hists = {grouped(hists.real_pt2_LSTdBeta, grp, c), grouped(hists.fake_pt2_LSTdBeta, grp, c)},
+            .hists = {grouped(hists.real_pt2_LSTdBeta, g.cats, g.charges), grouped(hists.fake_pt2_LSTdBeta, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -167,7 +194,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "Actual Z - Kinematic Predicted Z [cm]",
             .yAxis = "Entries",
             .filename = "pt2_all_LSTKinZRes" + sfx,
-            .hists = {grouped(hists.real_pt2_LSTKinZRes, grp, c), grouped(hists.fake_pt2_LSTKinZRes, grp, c)},
+            .hists = {grouped(hists.real_pt2_LSTKinZRes, g.cats, g.charges), grouped(hists.fake_pt2_LSTKinZRes, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -177,7 +204,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "Actual Z - Origin Predicted Z [cm]",
             .yAxis = "Entries",
             .filename = "pt2_all_LSTOrgZRes" + sfx,
-            .hists = {grouped(hists.real_pt2_LSTOrgZRes, grp, c), grouped(hists.fake_pt2_LSTOrgZRes, grp, c)},
+            .hists = {grouped(hists.real_pt2_LSTOrgZRes, g.cats, g.charges), grouped(hists.fake_pt2_LSTOrgZRes, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -187,7 +214,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "LST #Delta#phi [rad]",
             .yAxis = "Entries",
             .filename = "pt2_all_LSTdPhi" + sfx,
-            .hists = {grouped(hists.real_pt2_LSTdPhi, grp, c), grouped(hists.fake_pt2_LSTdPhi, grp, c)},
+            .hists = {grouped(hists.real_pt2_LSTdPhi, g.cats, g.charges), grouped(hists.fake_pt2_LSTdPhi, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
          });
@@ -202,7 +229,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "dXY [cm]",
             .yAxis = "Entries",
             .filename = "pt2_all_md0_dxy" + sfx,
-            .hists = {grouped(hists.real_pt2_MD0_dXY, grp, c), grouped(hists.fake_pt2_MD0_dXY, grp, c)},
+            .hists = {grouped(hists.real_pt2_MD0_dXY, g.cats, g.charges), grouped(hists.fake_pt2_MD0_dXY, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -212,7 +239,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "dZ [cm]",
             .yAxis = "Entries",
             .filename = "pt2_all_md0_dz" + sfx,
-            .hists = {grouped(hists.real_pt2_MD0_dZ, grp, c), grouped(hists.fake_pt2_MD0_dZ, grp, c)},
+            .hists = {grouped(hists.real_pt2_MD0_dZ, g.cats, g.charges), grouped(hists.fake_pt2_MD0_dZ, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -222,7 +249,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "dXY [cm]",
             .yAxis = "Entries",
             .filename = "pt2_all_md1_dxy" + sfx,
-            .hists = {grouped(hists.real_pt2_MD1_dXY, grp, c), grouped(hists.fake_pt2_MD1_dXY, grp, c)},
+            .hists = {grouped(hists.real_pt2_MD1_dXY, g.cats, g.charges), grouped(hists.fake_pt2_MD1_dXY, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -232,7 +259,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "dZ [cm]",
             .yAxis = "Entries",
             .filename = "pt2_all_md1_dz" + sfx,
-            .hists = {grouped(hists.real_pt2_MD1_dZ, grp, c), grouped(hists.fake_pt2_MD1_dZ, grp, c)},
+            .hists = {grouped(hists.real_pt2_MD1_dZ, g.cats, g.charges), grouped(hists.fake_pt2_MD1_dZ, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -242,7 +269,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "R_{act} - R_{pred} [cm]",
             .yAxis = "Entries",
             .filename = "pt2_all_md0_rz_simple" + sfx,
-            .hists = {grouped(hists.real_pt2_MD0_rz_simple, grp, c), grouped(hists.fake_pt2_MD0_rz_simple, grp, c)},
+            .hists = {grouped(hists.real_pt2_MD0_rz_simple, g.cats, g.charges), grouped(hists.fake_pt2_MD0_rz_simple, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -252,7 +279,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "R_{act} - R_{pred} [cm]",
             .yAxis = "Entries",
             .filename = "pt2_all_md1_rz_simple" + sfx,
-            .hists = {grouped(hists.real_pt2_MD1_rz_simple, grp, c), grouped(hists.fake_pt2_MD1_rz_simple, grp, c)},
+            .hists = {grouped(hists.real_pt2_MD1_rz_simple, g.cats, g.charges), grouped(hists.fake_pt2_MD1_rz_simple, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -266,7 +293,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "#Delta p_{T} [GeV]",
             .yAxis = "Entries",
             .filename = "pt2_unused_deltaPT" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_deltaPT, grp, c), grouped(hists.fake_unused_pt2_deltaPT, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_deltaPT, g.cats, g.charges), grouped(hists.fake_unused_pt2_deltaPT, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -276,7 +303,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "#Delta #phi [rad]",
             .yAxis = "Entries",
             .filename = "pt2_unused_deltaPHI" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_deltaPHI, grp, c), grouped(hists.fake_unused_pt2_deltaPHI, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_deltaPHI, g.cats, g.charges), grouped(hists.fake_unused_pt2_deltaPHI, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -286,7 +313,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "#eta",
             .yAxis = "Entries",
             .filename = "pt2_unused_deltaETA" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_deltaETA, grp, c), grouped(hists.fake_unused_pt2_deltaETA, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_deltaETA, g.cats, g.charges), grouped(hists.fake_unused_pt2_deltaETA, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -296,7 +323,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "#Delta R",
             .yAxis = "Entries",
             .filename = "pt2_unused_deltaR" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_deltaR, grp, c), grouped(hists.fake_unused_pt2_deltaR, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_deltaR, g.cats, g.charges), grouped(hists.fake_unused_pt2_deltaR, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
            .printYields = true
         });
@@ -307,7 +334,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "LST #Delta#beta [rad]",
             .yAxis = "Entries",
             .filename = "pt2_unused_LSTdBeta" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_LSTdBeta, grp, c), grouped(hists.fake_unused_pt2_LSTdBeta, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_LSTdBeta, g.cats, g.charges), grouped(hists.fake_unused_pt2_LSTdBeta, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -317,7 +344,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "Actual Z - Kinematic Predicted Z [cm]",
             .yAxis = "Entries",
             .filename = "pt2_unused_LSTKinZRes" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_LSTKinZRes, grp, c), grouped(hists.fake_unused_pt2_LSTKinZRes, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_LSTKinZRes, g.cats, g.charges), grouped(hists.fake_unused_pt2_LSTKinZRes, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -327,7 +354,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "Actual Z - Origin Predicted Z [cm]",
             .yAxis = "Entries",
             .filename = "pt2_unused_LSTOrgZRes" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_LSTOrgZRes, grp, c), grouped(hists.fake_unused_pt2_LSTOrgZRes, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_LSTOrgZRes, g.cats, g.charges), grouped(hists.fake_unused_pt2_LSTOrgZRes, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -337,7 +364,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "LST #Delta#phi [rad]",
             .yAxis = "Entries",
             .filename = "pt2_unused_LSTdPhi" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_LSTdPhi, grp, c), grouped(hists.fake_unused_pt2_LSTdPhi, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_LSTdPhi, g.cats, g.charges), grouped(hists.fake_unused_pt2_LSTdPhi, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -351,7 +378,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "dXY [cm]",
             .yAxis = "Entries",
             .filename = "pt2_unused_md0_dxy" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_MD0_dXY, grp, c), grouped(hists.fake_unused_pt2_MD0_dXY, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_MD0_dXY, g.cats, g.charges), grouped(hists.fake_unused_pt2_MD0_dXY, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -361,7 +388,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "dZ [cm]",
             .yAxis = "Entries",
             .filename = "pt2_unused_md0_dz" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_MD0_dZ, grp, c), grouped(hists.fake_unused_pt2_MD0_dZ, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_MD0_dZ, g.cats, g.charges), grouped(hists.fake_unused_pt2_MD0_dZ, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -371,7 +398,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "dXY [cm]",
             .yAxis = "Entries",
             .filename = "pt2_unused_md1_dxy" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_MD1_dXY, grp, c), grouped(hists.fake_unused_pt2_MD1_dXY, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_MD1_dXY, g.cats, g.charges), grouped(hists.fake_unused_pt2_MD1_dXY, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -381,7 +408,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "dZ [cm]",
             .yAxis = "Entries",
             .filename = "pt2_unused_md1_dz" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_MD1_dZ, grp, c), grouped(hists.fake_unused_pt2_MD1_dZ, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_MD1_dZ, g.cats, g.charges), grouped(hists.fake_unused_pt2_MD1_dZ, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -391,7 +418,7 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "R_{act} - R_{pred} [cm]",
             .yAxis = "Entries",
             .filename = "pt2_unused_md0_rz_simple" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_MD0_rz_simple, grp, c), grouped(hists.fake_unused_pt2_MD0_rz_simple, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_MD0_rz_simple, g.cats, g.charges), grouped(hists.fake_unused_pt2_MD0_rz_simple, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
@@ -401,11 +428,10 @@ std::vector<PlotRecipe> getPt2Recipes(const HistogramManager& hists) {
             .xAxis = "R_{act} - R_{pred} [cm]",
             .yAxis = "Entries",
             .filename = "pt2_unused_md1_rz_simple" + sfx,
-            .hists = {grouped(hists.real_unused_pt2_MD1_rz_simple, grp, c), grouped(hists.fake_unused_pt2_MD1_rz_simple, grp, c)},
+            .hists = {grouped(hists.real_unused_pt2_MD1_rz_simple, g.cats, g.charges), grouped(hists.fake_unused_pt2_MD1_rz_simple, g.cats, g.charges)},
             .legend = {"Real", "Fake"},
             .printYields = true
         });
-     }
     }
 
     return recipes;
