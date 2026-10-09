@@ -19,7 +19,8 @@
 // weight branch cannot repair a contest that never took place.
 //
 // Run in full (./bin/pt2 process -k -c -a 1), these same thresholds give:
-//     signal efficiency 50.76%, fake kept 0.0163%, real/fake 7.611
+//     signal efficiency 51.16%, fake kept 0.0153%, real/fake 8.159
+// (50.76% / 7.611 before the ambiguity score gained its three extra terms)
 // Efficiency is lower because reals lose contests they used to win; the ratio
 // is higher because fakes now mostly knock each other out instead of each
 // surviving one being kept and multiplied by 50.
@@ -44,6 +45,15 @@ constexpr double kSigmaXY0 = 0.325176;
 constexpr double kSigmaZ0  = 0.047054;
 constexpr double kSigmaXY1 = 0.552739;
 constexpr double kSigmaZ1  = 0.077080;
+
+// Three more residuals in the same units, measured the same way on the
+// full-density 44-event dump. Including them in the ranking is free: it adds
+// no cut, it only decides each contest better. Measured against the heli-only
+// score on that dump, 50.59% -> 50.97% efficiency AND 7.725 -> 8.262 ratio,
+// and it stays ahead on both axes at every box tightness tested.
+constexpr double kSigmaDBeta   = 0.009163;
+constexpr double kSigmaZResKin = 1.328540;
+constexpr double kSigmaDeltaPt = 0.042621;
 
 // true when the value is inside the window for this zone; a NAN bound
 // is simply not applied, and an uncomputable value passes (matching
@@ -591,16 +601,31 @@ inline bool passAll(const pT2 &p, double lsPt) {
     return true;
 }
 
-// Ranking score for ambiguity resolution: how far the pLS extrapolation misses
-// the two mini-doublets, in units of the spread seen on real pT2s. Smaller is
-// better. A pT2 with no helical extrapolation cannot be compared, so it is
-// pushed to the back of the queue rather than silently winning.
+// One squared residual in units of its own spread. A residual that could not
+// be computed contributes nothing rather than poisoning the whole score.
+inline double chi2Term(double v, double sigma) {
+    if (!std::isfinite(v)) return 0.0;
+    const double t = v / sigma;
+    return t * t;
+}
+
+// Ranking score for ambiguity resolution: how far this pT2 sits from what a
+// real one looks like, summed over seven residuals in units of the spread
+// seen on real pT2s. Smaller is better. A pT2 with no helical extrapolation
+// cannot be compared at all, so it is pushed to the back of the queue rather
+// than silently winning.
 inline double ambiguityChi2(const pT2 &p) {
     if (p.heli.size() < 4 || !(p.heli[0] >= 0))
         return std::numeric_limits<double>::max();
-    const double a = p.heli[0] / kSigmaXY0, b = p.heli[1] / kSigmaZ0;
-    const double c = p.heli[2] / kSigmaXY1, d = p.heli[3] / kSigmaZ1;
-    return a * a + b * b + c * c + d * d;
+    double c = 0.0;
+    c += chi2Term(p.heli[0], kSigmaXY0);
+    c += chi2Term(p.heli[1], kSigmaZ0);
+    c += chi2Term(p.heli[2], kSigmaXY1);
+    c += chi2Term(p.heli[3], kSigmaZ1);
+    c += chi2Term(valid(p.delta_beta, -100.0), kSigmaDBeta);
+    c += chi2Term(valid(p.z_res_kin,  -100.0), kSigmaZResKin);
+    c += chi2Term(p.delta_pt,                  kSigmaDeltaPt);
+    return c;
 }
 
 }  // namespace pt2_cuts
