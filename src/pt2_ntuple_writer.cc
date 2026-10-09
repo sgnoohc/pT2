@@ -150,7 +150,8 @@ void Pt2NtupleWriter::injectIntoTCs()
         // Reverse truth match: tell the sim particle this track found it
         if (primarySimIdx >= 0 && primarySimIdx < (int)r.sim_tcIdxAll->size()) {
             r.sim_tcIdxAll->at(primarySimIdx).push_back(newTcIdx);
-            if (r.sim_tcIdx->at(primarySimIdx) == -1) r.sim_tcIdx->at(primarySimIdx) = newTcIdx;
+            // The LST ntuple marks "no TC" with -999, not -1
+            if (r.sim_tcIdx->at(primarySimIdx) < 0) r.sim_tcIdx->at(primarySimIdx) = newTcIdx;
         }
     }
 }
