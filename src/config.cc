@@ -13,9 +13,10 @@ const char* kInputLowPT = "/blue/avery/aaponteutani/CMSSW_16_1_0/src/RecoTracker
 const char* kInput      = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/ROOT_FILES/LSTNtuple.root";
 
 // Alternative pixel maps, kept for reference:
+//   /cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/PIXEL_MAPS/Pixel_Maps_0p6GeV/  (0.6 GeV)
 //   /blue/p.chang/aaponteutani/LSTGeometry/output_0p4/pixelmap/  (0.4 GeV)
 //   /blue/p.chang/aaponteutani/LSTGeometry/output_0p3/pixelmap/  (0.5 GeV)
-const char* kPixelMapLowPT = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/PIXEL_MAPS/Pixel_Maps_0p6GeV/";
+const char* kPixelMapLowPT = "/blue/p.chang/aaponteutani/LSTGeometry/output/pixelmap/";
 const char* kPixelMap      = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/PIXEL_MAPS/Pixel_Maps_0p8GeV/";
 
 const char* kNNModelDir = "/cmsuf/data/store/user/t2/users/matthew.dittrich/PT2_DATA/NN_MODEL";
@@ -30,6 +31,9 @@ void printUsage(const char* prog)
               << "    -n  Number of events\n"
               << "    -r  Also write LSTNtuple_with_pT2.root (with NN scores) and pt2_training_data.root\n"
               << "    -N  NN model directory with model.onnx, mean.npy, std.npy\n"
+              << "    -X  Turn the NN off (no model is loaded, nn_score stays -1)\n"
+              << "    -c  Apply the tuned per-zone threshold cuts in src/pt2_cuts.h\n"
+              << "    -a  Ambiguity: keep only the N best pT2s per (pLS, zone, charge)\n"
               << "\n"
               << "  scan      Compute cut values from the histogram file\n"
               << "    -e  Target efficiency percent (default 90)\n"
@@ -62,7 +66,7 @@ bool parseArgs(int argc, char** argv, Config& cfg)
     // Parse options after the subcommand
     optind = 2;
     int opt;
-    while ((opt = getopt(argc, argv, "rki:o:n:e:H:N:")) != -1) {
+    while ((opt = getopt(argc, argv, "rkXci:o:n:e:H:N:a:")) != -1) {
         switch (opt) {
         case 'r': cfg.writeRoot = true; break;
         case 'k': cfg.lowPT = true; break;
@@ -72,6 +76,9 @@ bool parseArgs(int argc, char** argv, Config& cfg)
         case 'e': cfg.targetPercent = std::stod(optarg); break;
         case 'H': cfg.histFile = optarg; break;
         case 'N': cfg.nnModelDir = optarg; break;
+        case 'X': cfg.useNN = false; break;
+        case 'c': cfg.applyCuts = true; break;
+        case 'a': cfg.keepPerPls = std::stoi(optarg); break;
         default:
             printUsage(argv[0]);
             return false;
@@ -96,7 +103,13 @@ void printConfig(const Config& cfg)
         std::cout << "Pixel maps:        " << cfg.pixelMapDir << "\n";
         std::cout << "Use Low pT:        " << (cfg.lowPT ? "yes" : "no") << "\n";
         std::cout << "Write ROOT file:   " << (cfg.writeRoot ? "yes" : "no") << "\n";
-        if (cfg.writeRoot) std::cout << "NN model dir:      " << cfg.nnModelDir << "\n";
+        if (cfg.writeRoot) {
+            if (cfg.useNN) std::cout << "NN model dir:      " << cfg.nnModelDir << "\n";
+            else           std::cout << "NN scoring:        off (-X)\n";
+        }
+        std::cout << "Threshold cuts:    " << (cfg.applyCuts ? "on (pt2_cuts.h)" : "off") << "\n";
+        if (cfg.keepPerPls > 0)
+            std::cout << "Ambiguity:         keep " << cfg.keepPerPls << " best per (pLS, zone)\n";
         if (cfg.nEvents > 0) std::cout << "Number of events:  " << cfg.nEvents << "\n";
         break;
     case Mode::Scan:

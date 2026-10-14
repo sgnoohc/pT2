@@ -1,7 +1,9 @@
 #include "process.h"
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <map>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -13,6 +15,7 @@
 #include "gator.h"
 #include "histograms.h"
 #include "pt2.h"
+#include "pt2_cuts.h"
 #include "pt2_ntuple_writer.h"
 #include "pt2_scorer.h"
 #include "pt2_training_writer.h"
@@ -140,6 +143,41 @@ namespace
         }
     }
 
+    // Ambiguity resolution: several pT2s in the same zone often share a pLS and
+    // are really the same track reconstructed more than once. Keep only the
+    // `keep` best of each (pLS, zone, charge) group, ranked by how well the pLS
+    // extrapolation lands on the LS, and drop the rest from `selected`.
+    //
+    // This runs after the threshold cuts, so a pT2 that was already rejected
+    // never takes a slot away from one that survived.
+    void resolveAmbiguity(std::vector<pT2 *> &selected, int keep)
+    {
+        std::map<long long, std::vector<std::pair<double, pT2 *>>> groups;
+        for (pT2 *p : selected)
+        {
+            if (p->combo_idx < 0 || p->charge_idx < 0) continue;
+            long long key = (long long)p->pls_idx * 26 + p->combo_idx * 2 + p->charge_idx;
+            groups[key].push_back({pt2_cuts::ambiguityChi2(*p), p});
+        }
+
+        std::vector<pT2 *> losers;
+        for (auto &kv : groups)
+        {
+            auto &v = kv.second;
+            if ((int)v.size() <= keep) continue;
+            std::nth_element(v.begin(), v.begin() + keep, v.end());
+            for (size_t k = keep; k < v.size(); ++k)
+                losers.push_back(v[k].second);
+        }
+        if (losers.empty()) return;
+
+        std::sort(losers.begin(), losers.end());
+        selected.erase(std::remove_if(selected.begin(), selected.end(),
+                                      [&](pT2 *p)
+                                      { return std::binary_search(losers.begin(), losers.end(), p); }),
+                       selected.end());
+    }
+
     void fillHistograms(const HistogramManager &hists, const pT2 &pt2)
     {
         if (pt2.combo_idx < 0) return;
@@ -167,7 +205,8 @@ int runProcess(const Config &cfg)
     std::unique_ptr<Pt2Scorer> scorer;
     if (cfg.writeRoot)
     {
-        scorer = std::make_unique<Pt2Scorer>(cfg.nnModelDir + "/model.onnx", cfg.nnModelDir + "/mean.npy", cfg.nnModelDir + "/std.npy");
+        if (cfg.useNN)
+            scorer = std::make_unique<Pt2Scorer>(cfg.nnModelDir + "/model.onnx", cfg.nnModelDir + "/mean.npy", cfg.nnModelDir + "/std.npy");
         writer = std::make_unique<Pt2NtupleWriter>(cfg.outputDir + "/LSTNtuple_with_pT2.root", reader);
         trainWriter = std::make_unique<Pt2TrainingWriter>(cfg.outputDir + "/pt2_training_data.root", hists);
     }
@@ -193,15 +232,10 @@ int runProcess(const Config &cfg)
         {
             // pt2.print();
 
-            // cut....
-            // Candidate cuts, to be replaced by the output of `pt2 scan`:
-            // if (pt2.heli[1] > 0.4896 || pt2.heli[3] > 0.9304) return;
-            // if (pt2.heli[0] > 2.3896 || pt2.heli[2] > 3.4234) return;
-            // if (pt2.delta_phi < -0.3493 || pt2.delta_phi > 0.3457) return;
-            // if (pt2.rz_simple.first < -2.8875 || pt2.rz_simple.first > 1.2586 || pt2.rz_simple.second < -4.7368 || pt2.rz_simple.second > 1.8688) return;
-            // if (pt2.delta_pt < -0.6123 || pt2.delta_pt > 0.1846) return;
-            // if (pt2.delta_beta < -0.0445 || pt2.delta_beta > 0.0393) return;
-            // if (pt2.z_res_kin < -3.5895 || pt2.z_res_kin > 3.7145) return;
+            // The per-zone threshold cuts (-c) and the ambiguity step (-a N)
+            // have already been applied by the time a pT2 gets here; see the
+            // selection loop below.
+            //
             // NN cut, score thresholds by real efficiency:
             //   90%: 0.99761337  95%: 0.99330878  96%: 0.98942512  97%: 0.97682154
             //   98%: 0.92524022  99%: 0.71041596  99.9%: 0.01175442
@@ -212,15 +246,12 @@ int runProcess(const Config &cfg)
             fillHistograms(hists, pt2);
         };
 
-        // Buffer pT2s with their features, score them together, then process them
-        std::vector<pT2 *> batch;
-        auto flush = [&]()
-        {
-            if (scorer) scoreBatch(*scorer, reader, batch);
-            for (pT2 *pt2 : batch) processPt2(*pt2);
-            batch.clear();
-        };
+        size_t npt2 = 0;   // pT2s of this event inside the pT window
 
+        // Select the pT2s of this event: pT window, then the threshold cuts,
+        // then ambiguity. All three are off by default, so without -c / -a this
+        // keeps exactly what it always did.
+        std::vector<pT2 *> selected;
         for (auto &pt2 : pt2s)
         {
             float plsPt = reader.pls_pt->at(pt2.pls_idx);
@@ -228,7 +259,24 @@ int runProcess(const Config &cfg)
 
             npt2++;
             computeFeatures(reader, pt2);
-            batch.push_back(&pt2);
+            if (cfg.applyCuts && !pt2_cuts::passAll(pt2, reader.ls_pt->at(pt2.ls_idx))) continue;
+            selected.push_back(&pt2);
+        }
+        if (cfg.keepPerPls > 0) resolveAmbiguity(selected, cfg.keepPerPls);
+
+        // Score the survivors in batches, then process them
+        std::vector<pT2 *> batch;
+        auto flush = [&]()
+        {
+            if (batch.empty()) return;
+            if (scorer) scoreBatch(*scorer, reader, batch);
+            for (pT2 *pt2 : batch) processPt2(*pt2);
+            batch.clear();
+        };
+
+        for (pT2 *pt2 : selected)
+        {
+            batch.push_back(pt2);
             if (batch.size() == kNNBatchSize) flush();
         }
         flush();
