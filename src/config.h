@@ -18,6 +18,7 @@ struct Config {
     bool useNN = true;           // -X turns the NN off, leaving nn_score at -1
     bool applyCuts = false;      // -c applies the thresholds in pt2_cuts.h
     int keepPerPls = 0;          // -a N keeps only the N best pT2s per (pLS, zone)
+    int maxContest = 0;          // -s N drops pT2s whose contest holds more than N
 
     // scan
     double targetPercent = 90;

@@ -143,6 +143,42 @@ namespace
         }
     }
 
+    // Contest size cut. The pT2s sharing a pLS within one zone and charge are
+    // a "contest": at most one of them can be the real track, so the rest are
+    // fake by construction. How crowded the contest is says something about a
+    // candidate that no per-candidate cut can see -- a pLS that pairs with
+    // many LS is one whose trajectory is poorly constrained, pointing into a
+    // region where many segments could plausibly follow it.
+    //
+    // Measured over 175 events on top of the box cuts: keeping only contests
+    // of 2 or fewer takes real/fake from 3.67 to 6.68, at 59.4% efficiency
+    // against 76.5%. Keeping only uncontested pT2s (-s 1) reaches 16.4 at
+    // 30.9%, because that population is 61,709 real against 3,555 fake.
+    //
+    // This runs BEFORE ambiguity and only rejects -- it never picks a winner,
+    // so it composes with -a rather than replacing it.
+    void applyContestSizeCut(std::vector<pT2 *> &selected, int maxContest)
+    {
+        if (maxContest <= 0) return;
+
+        std::map<long long, int> size;
+        for (pT2 *p : selected)
+        {
+            if (p->combo_idx < 0 || p->charge_idx < 0) continue;
+            size[(long long)p->pls_idx * 26 + p->combo_idx * 2 + p->charge_idx]++;
+        }
+
+        selected.erase(std::remove_if(selected.begin(), selected.end(),
+                                      [&](pT2 *p)
+                                      {
+                                          if (p->combo_idx < 0 || p->charge_idx < 0) return true;
+                                          long long key = (long long)p->pls_idx * 26 + p->combo_idx * 2 + p->charge_idx;
+                                          auto it = size.find(key);
+                                          return it == size.end() || it->second > maxContest;
+                                      }),
+                       selected.end());
+    }
+
     // Ambiguity resolution: several pT2s in the same zone often share a pLS and
     // are really the same track reconstructed more than once. Keep only the
     // `keep` best of each (pLS, zone, charge) group, ranked by how well the pLS
@@ -262,6 +298,7 @@ int runProcess(const Config &cfg)
             if (cfg.applyCuts && !pt2_cuts::passAll(pt2, reader.ls_pt->at(pt2.ls_idx))) continue;
             selected.push_back(&pt2);
         }
+        applyContestSizeCut(selected, cfg.maxContest);
         if (cfg.keepPerPls > 0) resolveAmbiguity(selected, cfg.keepPerPls);
 
         // Score the survivors in batches, then process them

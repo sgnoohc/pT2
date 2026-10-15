@@ -34,6 +34,7 @@ void printUsage(const char* prog)
               << "    -X  Turn the NN off (no model is loaded, nn_score stays -1)\n"
               << "    -c  Apply the tuned per-zone threshold cuts in src/pt2_cuts.h\n"
               << "    -a  Ambiguity: keep only the N best pT2s per (pLS, zone, charge)\n"
+              << "    -s  Drop every pT2 of a contest holding more than N candidates\n"
               << "\n"
               << "  scan      Compute cut values from the histogram file\n"
               << "    -e  Target efficiency percent (default 90)\n"
@@ -66,7 +67,7 @@ bool parseArgs(int argc, char** argv, Config& cfg)
     // Parse options after the subcommand
     optind = 2;
     int opt;
-    while ((opt = getopt(argc, argv, "rkXci:o:n:e:H:N:a:")) != -1) {
+    while ((opt = getopt(argc, argv, "rkXci:o:n:e:H:N:a:s:")) != -1) {
         switch (opt) {
         case 'r': cfg.writeRoot = true; break;
         case 'k': cfg.lowPT = true; break;
@@ -79,6 +80,7 @@ bool parseArgs(int argc, char** argv, Config& cfg)
         case 'X': cfg.useNN = false; break;
         case 'c': cfg.applyCuts = true; break;
         case 'a': cfg.keepPerPls = std::stoi(optarg); break;
+        case 's': cfg.maxContest = std::stoi(optarg); break;
         default:
             printUsage(argv[0]);
             return false;
@@ -108,6 +110,8 @@ void printConfig(const Config& cfg)
             else           std::cout << "NN scoring:        off (-X)\n";
         }
         std::cout << "Threshold cuts:    " << (cfg.applyCuts ? "on (pt2_cuts.h)" : "off") << "\n";
+        if (cfg.maxContest > 0)
+            std::cout << "Contest size cut:  drop contests larger than " << cfg.maxContest << "\n";
         if (cfg.keepPerPls > 0)
             std::cout << "Ambiguity:         keep " << cfg.keepPerPls << " best per (pLS, zone)\n";
         if (cfg.nEvents > 0) std::cout << "Number of events:  " << cfg.nEvents << "\n";
