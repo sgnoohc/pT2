@@ -1,6 +1,11 @@
 #include "pt2_training_writer.h"
 
 #include <cmath>
+#include <limits>
+
+#include "pt2_cuts.h"
+
+#include <cmath>
 #include <stdexcept>
 
 Pt2TrainingWriter::Pt2TrainingWriter(const std::string &path, const HistogramManager &hists)
@@ -37,6 +42,7 @@ Pt2TrainingWriter::Pt2TrainingWriter(const std::string &path, const HistogramMan
     tree_->Branch("lst_zResGeo", &lst_zResGeo_);
     tree_->Branch("lst_zResKin", &lst_zResKin_);
     tree_->Branch("dAngle", &dAngle_);
+    tree_->Branch("pt2_chi2", &chi2_);
     tree_->Branch("is_real", &is_real_);
     // Same order as extra_cuts::getConnectionIndex
     for (int ci = 0; ci < kNCat; ++ci)
@@ -91,6 +97,18 @@ void Pt2TrainingWriter::add(const rootReader &reader, const pT2 &pt2)
     is_real_ = pt2.is_real ? 1 : 0;
     for (int ci = 0; ci < kNCat; ++ci)
         is_cat_[ci] = (pt2.combo_idx == ci) ? 1 : 0;
+
+    // How far this pT2 sits from what a real one looks like, summed over the
+    // seven residuals in units of their spread over real pT2s. The same score
+    // that ranks candidates in -a; here it is only recorded, never cut on.
+    // A pT2 with no helical extrapolation gets NaN rather than a sentinel, so
+    // training code can mask it.
+    {
+        const double c = pt2_cuts::ambiguityChi2(pt2);
+        chi2_ = std::isfinite(c) && c < std::numeric_limits<double>::max()
+                    ? static_cast<float>(c)
+                    : std::numeric_limits<float>::quiet_NaN();
+    }
 
     tree_->Fill();
 }

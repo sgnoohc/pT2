@@ -1,5 +1,10 @@
 #include "pt2_ntuple_writer.h"
 
+#include <cmath>
+#include <limits>
+
+#include "pt2_cuts.h"
+
 #include <stdexcept>
 
 Pt2NtupleWriter::Pt2NtupleWriter(const std::string& path, rootReader& reader)
@@ -24,6 +29,7 @@ Pt2NtupleWriter::Pt2NtupleWriter(const std::string& path, rootReader& reader)
     tree_->Branch("pT2_deltaPhi", &deltaPhi_);
     tree_->Branch("pT2_dR", &dR_);
     tree_->Branch("pT2_NNscore", &nnScore_);
+    tree_->Branch("pT2_chi2", &chi2_);
     tree_->Branch("pT2_matched_simIdx", &matchedSimIdx_);
     tree_->Branch("sim_pT2_matched", &simMatched_);
 }
@@ -48,6 +54,7 @@ void Pt2NtupleWriter::beginEvent()
     deltaPhi_.clear();
     dR_.clear();
     nnScore_.clear();
+    chi2_.clear();
     matchedSimIdx_.clear();
 
     if (reader_.sim_pt) simMatched_.assign(reader_.sim_pt->size(), 0);
@@ -72,6 +79,14 @@ void Pt2NtupleWriter::add(const pT2& pt2)
     deltaPhi_.push_back(pt2.delta_phi);
     dR_.push_back(pt2.delta_r);
     nnScore_.push_back(pt2.nn_score);
+    // The ambiguity ranking score, recorded as a feature; NaN when the
+    // helical extrapolation is unavailable, so downstream code can mask it.
+    {
+        const double c = pt2_cuts::ambiguityChi2(pt2);
+        chi2_.push_back(std::isfinite(c) && c < std::numeric_limits<double>::max()
+                            ? static_cast<float>(c)
+                            : std::numeric_limits<float>::quiet_NaN());
+    }
 
     if (pt2.is_real) {
         int simIdx = reader_.pls_simIdx->at(plsIdx);

@@ -41,6 +41,7 @@ private:
     float md0_rz_, md1_rz_, log_abs_md0_dxy_;
     float lst_dPhi_, betaIn_, betaOut_, dBeta_;
     float lst_zResGeo_, lst_zResKin_, dAngle_;
+    float chi2_;   // pt2_cuts::ambiguityChi2, NaN when it cannot be computed
     int is_real_;
     std::array<int, kNCat> is_cat_; // one-hot layer-connection category
 };
