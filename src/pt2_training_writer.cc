@@ -43,6 +43,7 @@ Pt2TrainingWriter::Pt2TrainingWriter(const std::string &path, const HistogramMan
     tree_->Branch("lst_zResKin", &lst_zResKin_);
     tree_->Branch("dAngle", &dAngle_);
     tree_->Branch("pt2_chi2", &chi2_);
+    tree_->Branch("pt2_contest_size", &contest_size_);
     tree_->Branch("is_real", &is_real_);
     // Same order as extra_cuts::getConnectionIndex
     for (int ci = 0; ci < kNCat; ++ci)
@@ -109,6 +110,8 @@ void Pt2TrainingWriter::add(const rootReader &reader, const pT2 &pt2)
                     ? static_cast<float>(c)
                     : std::numeric_limits<float>::quiet_NaN();
     }
+
+    contest_size_ = pt2.contest_size;
 
     tree_->Fill();
 }

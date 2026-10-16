@@ -42,6 +42,7 @@ private:
     std::vector<float> deltaPt_, deltaEta_, deltaPhi_, dR_;
     std::vector<float> nnScore_;
     std::vector<float> chi2_;
+    std::vector<int> contestSize_;
     std::vector<std::vector<int>> matchedSimIdx_;
     std::vector<int> simMatched_;  // per sim track: number of pT2s matched to it
 };

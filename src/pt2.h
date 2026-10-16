@@ -28,6 +28,7 @@ struct pT2 {
     std::pair<double, double> rz_simple;    // MD0, MD1
     double lst_delta_phi = NAN, beta_in = NAN, beta_out = NAN, delta_beta = NAN, z_res_geo = NAN, z_res_kin = NAN;
     float nn_score = -1;                    // NN real-vs-fake score in [0, 1], -1 if no model loaded
+    int contest_size = -1;                  // pT2s sharing this pLS in this zone and charge, -1 if not computed
 
     // Constructors
     pT2() = default;

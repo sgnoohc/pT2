@@ -287,7 +287,7 @@ int runProcess(const Config &cfg)
         // Select the pT2s of this event: pT window, then the threshold cuts,
         // then ambiguity. All three are off by default, so without -c / -a this
         // keeps exactly what it always did.
-        std::vector<pT2 *> selected;
+        std::vector<pT2 *> selected, inWindow;
         for (auto &pt2 : pt2s)
         {
             float plsPt = reader.pls_pt->at(pt2.pls_idx);
@@ -295,9 +295,32 @@ int runProcess(const Config &cfg)
 
             npt2++;
             computeFeatures(reader, pt2);
-            if (cfg.applyCuts && !pt2_cuts::passAll(pt2, reader.ls_pt->at(pt2.ls_idx))) continue;
-            selected.push_back(&pt2);
+            inWindow.push_back(&pt2);
         }
+
+        for (pT2 *p : inWindow)
+        {
+            if (cfg.applyCuts && !pt2_cuts::passAll(*p, reader.ls_pt->at(p->ls_idx))) continue;
+            selected.push_back(p);
+        }
+
+        // How many pT2s share each pLS within one zone and charge, counted over
+        // the candidates that reached this point. With -c that is the survivors
+        // of the box cuts, which is the number that discriminates: before the
+        // cuts a pLS pairs with ~100 LS and the count says nothing. Recorded as
+        // a feature here; -s below tests the same quantity.
+        {
+            std::map<long long, int> tally;
+            for (pT2 *p : selected)
+                if (p->combo_idx >= 0 && p->charge_idx >= 0)
+                    tally[(long long)p->pls_idx * 26 + p->combo_idx * 2 + p->charge_idx]++;
+            for (pT2 *p : selected)
+            {
+                if (p->combo_idx < 0 || p->charge_idx < 0) continue;
+                p->contest_size = tally[(long long)p->pls_idx * 26 + p->combo_idx * 2 + p->charge_idx];
+            }
+        }
+
         applyContestSizeCut(selected, cfg.maxContest);
         if (cfg.keepPerPls > 0) resolveAmbiguity(selected, cfg.keepPerPls);
 

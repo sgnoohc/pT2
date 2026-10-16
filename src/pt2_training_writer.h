@@ -42,6 +42,7 @@ private:
     float lst_dPhi_, betaIn_, betaOut_, dBeta_;
     float lst_zResGeo_, lst_zResKin_, dAngle_;
     float chi2_;   // pt2_cuts::ambiguityChi2, NaN when it cannot be computed
+    int contest_size_;  // pT2s sharing this pLS in this zone, before any cut
     int is_real_;
     std::array<int, kNCat> is_cat_; // one-hot layer-connection category
 };

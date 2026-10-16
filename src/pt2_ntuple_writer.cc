@@ -30,6 +30,7 @@ Pt2NtupleWriter::Pt2NtupleWriter(const std::string& path, rootReader& reader)
     tree_->Branch("pT2_dR", &dR_);
     tree_->Branch("pT2_NNscore", &nnScore_);
     tree_->Branch("pT2_chi2", &chi2_);
+    tree_->Branch("pT2_contestSize", &contestSize_);
     tree_->Branch("pT2_matched_simIdx", &matchedSimIdx_);
     tree_->Branch("sim_pT2_matched", &simMatched_);
 }
@@ -55,6 +56,7 @@ void Pt2NtupleWriter::beginEvent()
     dR_.clear();
     nnScore_.clear();
     chi2_.clear();
+    contestSize_.clear();
     matchedSimIdx_.clear();
 
     if (reader_.sim_pt) simMatched_.assign(reader_.sim_pt->size(), 0);
@@ -87,6 +89,7 @@ void Pt2NtupleWriter::add(const pT2& pt2)
                             ? static_cast<float>(c)
                             : std::numeric_limits<float>::quiet_NaN());
     }
+    contestSize_.push_back(pt2.contest_size);
 
     if (pt2.is_real) {
         int simIdx = reader_.pls_simIdx->at(plsIdx);
